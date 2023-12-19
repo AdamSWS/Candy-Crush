@@ -1,0 +1,311 @@
+<!--
+CandyCrush
+Your Name: Adam Shaar
+Collaborators: I discussed the assignment with nobody.
+-->
+<!DOCTYPE html>
+<html>
+<!--
+/* Copyright (c) 2017 MIT 6.813/6.831 course staff, all rights reserved.
+ * Redistribution of original or derived work requires permission of course staff.
+ */
+-->
+
+<head>
+  <meta charset="utf-8">
+  <title>CandyCrush</title>
+  <!-- Load style sheets -->
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0-alpha.6/css/bootstrap.css">
+  <link rel="stylesheet" href="mainLayout.css">
+  <!-- Use mobile-aware viewport -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+  <!-- Load any supplemental Javascript libraries here -->
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/seedrandom/2.4.2/seedrandom.js"></script>
+  <script src="candy.js"></script>
+  <script src="board.js"></script>
+  <script src="rules.js"></script>
+  <script>
+    // By default, the first board loaded by your page will be the same 
+    // each time you load (which is accomplished by "seeding" the random
+    // number generator. This makes testing (and grading!) easier!
+    Math.seedrandom(0);
+
+    // A short jQuery extension to read query parameters from the URL.
+    $.extend({
+      getUrlVars: function () {
+        var vars = [], pair;
+        var pairs = window.location.search.substr(1).split('&');
+        for (var i = 0; i < pairs.length; i++) {
+          pair = pairs[i].split('=');
+          vars.push(pair[0]);
+          vars[pair[0]] = pair[1] && decodeURIComponent(pair[1].replace(/\+/g, ' '));
+        }
+        return vars;
+      },
+      getUrlVar: function (name) {
+        return $.getUrlVars()[name];
+      }
+    });
+
+    // constants
+    var DEFAULT_BOARD_SIZE = 8;
+
+    // data model at global scope for easier debugging
+    var board;
+    var rules;
+    var table;// Moved the table reference outside of the ready function for global access
+
+    // initialize board
+    if ($.getUrlVar('size') && $.getUrlVar('size') >= 3) {
+      board = new Board($.getUrlVar('size'));
+    } else {
+      board = new Board(DEFAULT_BOARD_SIZE);
+    }
+
+    // load a rule
+    rules = new Rules(board);
+
+    $(document).ready(function () {
+      table = $(".game-board");
+      initGameTable(); // Initialize the game's table/grid
+      initializeGameListeners(); // Set up event listeners for game actions
+      rules.prepareNewGame();
+      $("#up, #down, #left, #right").prop('disabled', true);
+      updateBoardVisuals();
+      updateButtonStates();
+    });
+
+    function initGameTable() {
+      // Create a 8x8 table grid and label each cell with its coordinate
+      for (var i = 0; i < 8; i++) {
+        var row = $("<tr></tr>");
+        for (var j = 0; j < 8; j++) {
+          var cell = $("<td></td>");
+          var colLetter = String.fromCharCode(97 + j);
+          var cellLabel = colLetter + (i + 1);
+          cell.text(cellLabel);
+          cell.attr("data-row", i);
+          cell.attr("data-col", j);
+          row.append(cell);
+        }
+        table.append(row);
+      }
+    }
+
+    function initializeGameListeners() {
+      // Assign event listeners to game buttons and keypresses
+      $("button.btn-primary.btn-block").on("click", function () {
+        board = new Board(DEFAULT_BOARD_SIZE);
+        rules = new Rules(board);
+        rules.prepareNewGame();
+        updateBoardVisuals();
+        $('#score').text('0');
+      });
+      $(document).on('keydown', function (evt) {
+        if (evt.key === 'n' || evt.key === 'N') {
+          $("button.btn-primary.btn-block").click();
+        } else if (evt.key === ' ') {
+          $(".btn-danger.btn-block").click();
+          evt.preventDefault();
+        }
+      });
+
+      $(board).on("add move", updateBoardVisuals);
+
+      $('#moveInput').on('input', handleMoveInput);
+
+      // Assign event listeners to move buttons
+      $(document).on('click', '#up', handleUpMove);
+      $(document).on('click', '#down', handleDownMove);
+      $(document).on('click', '#left', handleLeftMove);
+      $(document).on('click', '#right', handleRightMove);
+      $(document).on('click', '.btn-danger.btn-block', crushAndMoveDown);
+    }
+
+    function handleMoveInput() {
+      // Validate move input and enable/disable move buttons accordingly
+      const inputVal = $(this).val().toLowerCase();
+      const isValid = /^[a-h][1-8]$/.test(inputVal);
+      const move = parseMove(inputVal);
+      const candy = board.getCandyAt(move.row, move.col);
+
+      const enabledColor = "#28a745";
+      const disabledColor = "#6C757D";
+
+      if (isValid && candy) {
+        toggleDirectionButtons("up", rules.isMoveTypeValid(candy, "up"), enabledColor, disabledColor);
+        toggleDirectionButtons("down", rules.isMoveTypeValid(candy, "down"), enabledColor, disabledColor);
+        toggleDirectionButtons("left", rules.isMoveTypeValid(candy, "left"), enabledColor, disabledColor);
+        toggleDirectionButtons("right", rules.isMoveTypeValid(candy, "right"), enabledColor, disabledColor);
+      } else {
+        $("#up, #down, #left, #right").prop('disabled', true).css('background-color', disabledColor);
+      }
+    }
+    function toggleDirectionButtons(direction, isValid, enabledColor, disabledColor) {
+      if (isValid) {
+        $("#" + direction).prop('disabled', false).css('background-color', enabledColor);
+      } else {
+        $("#" + direction).prop('disabled', true).css('background-color', disabledColor);
+      }
+    }
+
+    function parseMove(moveString) {
+      const col = moveString.charCodeAt(0) - 97;
+      const row = parseInt(moveString[1]) - 1;
+      return { row: row, col: col };
+    }
+
+    function handleUpMove() {
+      processMove("up");
+    }
+
+    function handleDownMove() {
+      processMove("down");
+    }
+
+    function handleLeftMove() {
+      processMove("left");
+    }
+
+    function handleRightMove() {
+      processMove("right");
+    }
+
+    function processMove(direction) {
+      const move = parseMove($('#moveInput').val());
+      $('#moveInput').val('').focus();
+      $("#up, #down, #left, #right").prop('disabled', true).css('background-color', "#6C757D");
+      if (rules.isMoveTypeValid(board.getCandyAt(move.row, move.col), direction)) {
+        let targetRow = move.row;
+        let targetCol = move.col;
+        switch (direction) {
+          case "up": targetRow--; break;
+          case "down": targetRow++; break;
+          case "left": targetCol--; break;
+          case "right": targetCol++; break;
+        }
+        board.flipCandies(board.getCandyAt(move.row, move.col), board.getCandyAt(targetRow, targetCol));
+        updateBoardVisuals();
+        updateButtonStates();
+      }
+    }
+
+    function updateBoardVisuals() {
+      for (var i = 0; i < 8; i++) {
+        for (var j = 0; j < 8; j++) {
+          var candy = board.getCandyAt(i, j);
+          var cell = table.find(`td[data-row='${i}'][data-col='${j}']`);
+          if (candy) {
+            cell.css("background-color", candy.color);
+            cell.css("color", candy.color === 'yellow' ? "black" : "white");
+          } else {
+            cell.css("background-color", "");
+            cell.css("color", "white");
+            var colLetter = String.fromCharCode(97 + j);
+            var cellLabel = colLetter + (i + 1);
+            cell.text(cellLabel);
+          }
+        }
+      }
+    }
+
+    function updateButtonStates() {
+      var candiesToCrush = rules.getCandyCrushes();
+      const enabledColor = "#28a745";
+      const disabledColor = "#6C757D";
+      if (candiesToCrush.length > 0) {
+        $(".btn-danger.btn-block").prop('disabled', false).css('background-color', enabledColor);
+        $("#up, #down, #left, #right").prop('disabled', true).css('background-color', disabledColor);
+      } else {
+        $(".btn-danger.btn-block").prop('disabled', true).css('background-color', disabledColor);
+      }
+    }
+
+    function crushAndMoveDown() {
+      // Crush matching candies and move remaining candies down
+      disableUIControls();
+      var candiesToCrush = rules.getCandyCrushes();
+      if (candiesToCrush.length > 0) {
+        var currentScore = parseInt($('#score').text());
+        updateScore(currentScore + candiesToCrush.length * 10);
+
+        rules.removeCrushes(candiesToCrush);
+        updateBoardVisuals();
+        setTimeout(function () {
+          rules.moveCandiesDown();
+          updateBoardVisuals();
+          crushAndMoveDown();
+        }, 500);
+      } else {
+        enableUIControls();
+      }
+    }
+
+    function disableUIControls() {
+      // Disable game controls during animations or game processes
+      $("#moveInput, #up, #down, #left, #right").prop('disabled', true);
+    }
+
+    function enableUIControls() {
+      // Enable game controls for user input
+      $("#moveInput").prop('disabled', false);
+    }
+
+    function incrementScore() {
+      var currentScore = parseInt($('#score').text());
+      updateScore(currentScore + 10);
+    }
+
+    function updateScore(newScore) {
+      $('#score').text(newScore);
+    }
+
+  </script>
+</head>
+
+<body>
+
+
+  <div class="container text-center">
+    <div class="row align-items-start">
+      <!-- First Column -->
+      <div class="col-md-2" id="firstColumn">
+        <h1 class="text-center">Candy Crush</h1>
+        <button class="btn btn-primary btn-block">New Game</button>
+      </div>
+
+      <!-- Second Column - Game Board -->
+      <div class="col-md-4" id="mainColumn">
+        <table class="game-board">
+          <!-- JavaScript will populate this table with rows and cells -->
+        </table>
+        <div class="score-display mt-3">
+          <h2>Score: <span id="score">0</span></h2>
+          <p>Press <strong>'n'</strong> for a new game. Press <strong>spacebar</strong> to crush once.</p>
+        </div>
+      </div>
+
+      <!-- Third Column -->
+      <div class="col-md-2 d-flex flex-column align-items-center mt-3">
+        <div class="row no-gutters align-items-center mb-2">
+          <label class="col-4 col-form-label mr-5">Move:</label>
+          <input type="text" id="moveInput" class="form-control" size="2" maxlength="2" style="color: black;">
+        </div>
+        <button class="btn btn-secondary mb-2" id="up">↑</button>
+        <div class="d-flex">
+          <button class="btn btn-secondary mr-2" id="left">←</button>
+          <!-- Empty space the size of a button -->
+          <div style="width: 40px;"></div>
+          <button class="btn btn-secondary ml-2" id="right">→</button>
+        </div>
+        <button class="btn btn-secondary mt-2" id="down">↓</button>
+        <!-- Moved the Crush button right below the ↓ arrow -->
+        <button class="btn btn-danger btn-block mt-3" style="width: 80%;">Crush Once</button>
+      </div>
+    </div>
+  </div>
+
+</body>
+
+</html>
